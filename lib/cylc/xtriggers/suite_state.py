@@ -20,22 +20,38 @@
 
 """
 
+from datetime import datetime, timedelta
 import os
 import sqlite3
 from cylc.cycling.util import add_offset
 from cylc.cfgspec.glbl_cfg import glbl_cfg
 from cylc.dbstatecheck import CylcSuiteDBChecker
-from isodatetime.parsers import TimePointParser
+from isodatetime.parsers import TimePointParser, DurationParser
 
 
 def suite_state(suite, task, point, offset=None, status='succeeded',
-                message=None, cylc_run_dir=None, debug=False):
+                message=None, cylc_run_dir=None, debug=False,
+                delay=None):
     """Connect to a suite DB and query the requested task state.
 
-    Reports satisfied only if the remote suite state has been achieved.
+    Reports satisfied only if the remote suite state has been achieved, and
+    if a delay has been specified, that the task reached that state at least
+    'delay' time ago.
+
+    If the 'delay' argument is used, it is advised to pair it with either a
+    message or a status with only one option, such as 'succeeded' or 'failed'.
+    If 'delay' is paired with a status such as 'start', then the delay will
+    apply to the latest of the acceptable statuses (e.g. running, retrying,
+    failed, succeeded). This could mean the delay is longer than desired.
+
     Returns all suite state args to pass on to triggering tasks.
 
     """
+    # As status has a default, make message take precedence over status
+    # if message is defined
+    if message is not None:
+        status = None
+
     cylc_run_dir = os.path.expandvars(
         os.path.expanduser(
             cylc_run_dir or glbl_cfg().get_host_item('run directory')))
@@ -50,10 +66,29 @@ def suite_state(suite, task, point, offset=None, status='succeeded',
     if fmt:
         my_parser = TimePointParser()
         point = str(my_parser.parse(point, dump_format=fmt))
-    if message is not None:
-        satisfied = checker.task_state_met(task, point, message=message)
-    else:
-        satisfied = checker.task_state_met(task, point, status=status)
+
+    satisfied = checker.task_state_met(task, point, message=message,
+                                       status=status)
+
+    # Extract the last time the condition was met and check if the
+    # desired length of time to wait has been met
+    time_remaining = 0
+
+    if satisfied and delay is not None:
+        my_parser = DurationParser()
+        delay_as_seconds = int(my_parser.parse(delay).get_seconds())
+        time_met = checker.get_last_time_state_met(task, point,
+                                                   message=message,
+                                                   status=status)
+        # satisfied is no longer true, the task state must have been
+        # reset in the time taken to get here
+        if time_met is None:
+            satisfied = False
+        else:
+            wait_time = time_met + timedelta(seconds=delay_as_seconds)
+            time_remaining = (wait_time - datetime.utcnow()).total_seconds()
+            satisfied = time_remaining <= 0
+
     results = {
         'suite': suite,
         'task': task,
@@ -61,6 +96,7 @@ def suite_state(suite, task, point, offset=None, status='succeeded',
         'offset': offset,
         'status': status,
         'message': message,
-        'cylc_run_dir': cylc_run_dir
+        'cylc_run_dir': cylc_run_dir,
+        'remaining_wait': max(0, time_remaining)
     }
     return (satisfied, results)

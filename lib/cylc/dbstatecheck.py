@@ -128,11 +128,16 @@ class CylcSuiteDBChecker(object):
         Returns:
             datetime: date of the last found matching status or message event
         """
+        # Do not allow status to be defined if message is defined
+        if message is not None:
+            status = None
+
+        # Ensure the state is currently met
         if not self.task_state_met(task, cycle, status, message):
             return None
 
-        stmt_args, stmt_wheres = self._setup_task_query(
-                task, cycle, status, "event")
+        stmt_args, stmt_wheres = self._setup_task_query(task, cycle, status,
+                                                        "event")
 
         # Append the message string if a message is provided
         if message is not None:
@@ -146,8 +151,8 @@ class CylcSuiteDBChecker(object):
         if stmt_wheres:
             stmt += " WHERE " + (" AND ").join(stmt_wheres)
         stmt += " ORDER BY time DESC LIMIT 1"
-
         result = self.conn.execute(stmt, stmt_args).fetchone()[0]
+
         return datetime.strptime(result, "%Y-%m-%d %H:%M:%S")
 
     def _setup_task_query(self, task=None, cycle=None, status=None,
