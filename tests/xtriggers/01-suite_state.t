@@ -1,7 +1,7 @@
 #!/bin/bash
 # THIS FILE IS PART OF THE CYLC SUITE ENGINE.
 # Copyright (C) 2008-2019 NIWA & British Crown (Met Office) & Contributors.
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -20,7 +20,7 @@
 # that stops once cycle short, so it should abort with waiting tasks.
 
 . $(dirname $0)/test_header
-set_test_number 8
+set_test_number 9
 
 install_suite ${TEST_NAME_BASE} ${TEST_NAME_BASE}
 
@@ -39,7 +39,7 @@ cylc run $SUITE_NAME_UPSTREAM
 # Run the test suite - it should fail after inactivity ...
 TEST_NAME=${TEST_NAME_BASE}-run-fail
 suite_run_fail ${TEST_NAME} \
-   cylc run --set=UPSTREAM=$SUITE_NAME_UPSTREAM --no-detach $SUITE_NAME
+   cylc run --debug --set=UPSTREAM=$SUITE_NAME_UPSTREAM --no-detach $SUITE_NAME
 
 SUITE_LOG=$(cylc cat-log -m p $SUITE_NAME)
 grep_ok "WARNING - suite timed out after inactivity for PT10S" $SUITE_LOG
@@ -59,10 +59,18 @@ JOB_LOG=$(cylc cat-log -f j -m p $SUITE_NAME f1.2015)
 contains_ok "${JOB_LOG}" << __END__
     upstream_task="foo"
     upstream_point="2015"
-    upstream_status="succeeded"
+    upstream_remaining_wait="0"
+    upstream_status="None"
     upstream_message="data ready"
     upstream_offset="None"
     upstream_suite="$SUITE_NAME_UPSTREAM"
+    upstream_status_task="bar"
+    upstream_status_point="2015"
+    upstream_status_remaining_wait="0"
+    upstream_status_status="succeed"
+    upstream_status_message="None"
+    upstream_status_offset="None"
+    upstream_status_suite="$SUITE_NAME_UPSTREAM"
 __END__
 
 # Check broadcast of xtrigger outputs is recorded: 1) in the suite log...
@@ -74,14 +82,27 @@ contains_ok "${SUITE_LOG}" << __LOG_BROADCASTS__
 	+ [f1.2015] [environment]upstream_suite=${SUITE_NAME_UPSTREAM}
 	+ [f1.2015] [environment]upstream_task=foo
 	+ [f1.2015] [environment]upstream_point=2015
+	+ [f1.2015] [environment]upstream_remaining_wait=0
 	+ [f1.2015] [environment]upstream_offset=None
-	+ [f1.2015] [environment]upstream_status=succeeded
+	+ [f1.2015] [environment]upstream_status=None
 	+ [f1.2015] [environment]upstream_message=data ready
 	- [f1.2015] [environment]upstream_suite=${SUITE_NAME_UPSTREAM}
 	- [f1.2015] [environment]upstream_task=foo
 	- [f1.2015] [environment]upstream_point=2015
-	- [f1.2015] [environment]upstream_status=succeeded
+	- [f1.2015] [environment]upstream_remaining_wait=0
 	- [f1.2015] [environment]upstream_message=data ready
+	+ [f1.2015] [environment]upstream_status_message=None
+	+ [f1.2015] [environment]upstream_status_offset=None
+	+ [f1.2015] [environment]upstream_status_point=2015
+	+ [f1.2015] [environment]upstream_status_remaining_wait=0
+	+ [f1.2015] [environment]upstream_status_status=succeed
+	+ [f1.2015] [environment]upstream_status_suite=${SUITE_NAME_UPSTREAM}
+	+ [f1.2015] [environment]upstream_status_task=bar
+	- [f1.2015] [environment]upstream_status_point=2015
+	- [f1.2015] [environment]upstream_status_remaining_wait=0
+	- [f1.2015] [environment]upstream_status_status=succeed
+	- [f1.2015] [environment]upstream_status_suite=${SUITE_NAME_UPSTREAM}
+	- [f1.2015] [environment]upstream_status_task=bar
 __LOG_BROADCASTS__
 # ... and 2) in the DB.
 TEST_NAME="${TEST_NAME_BASE}-check-broadcast-in-db"
@@ -97,18 +118,36 @@ contains_ok "${NAME}" << __DB_BROADCASTS__
 +|2015|f1|[environment]upstream_message|data ready
 +|2015|f1|[environment]upstream_offset|None
 +|2015|f1|[environment]upstream_point|2015
-+|2015|f1|[environment]upstream_status|succeeded
++|2015|f1|[environment]upstream_status|None
 +|2015|f1|[environment]upstream_suite|${SUITE_NAME_UPSTREAM}
 +|2015|f1|[environment]upstream_task|foo
 -|2015|f1|[environment]upstream_message|data ready
 -|2015|f1|[environment]upstream_point|2015
--|2015|f1|[environment]upstream_status|succeeded
 -|2015|f1|[environment]upstream_suite|${SUITE_NAME_UPSTREAM}
 -|2015|f1|[environment]upstream_task|foo
++|2015|f1|[environment]upstream_status_message|None
++|2015|f1|[environment]upstream_status_offset|None
++|2015|f1|[environment]upstream_status_point|2015
++|2015|f1|[environment]upstream_status_remaining_wait|0
++|2015|f1|[environment]upstream_status_status|succeed
++|2015|f1|[environment]upstream_status_suite|${SUITE_NAME_UPSTREAM}
++|2015|f1|[environment]upstream_status_task|bar
+-|2015|f1|[environment]upstream_status_point|2015
+-|2015|f1|[environment]upstream_status_remaining_wait|0
+-|2015|f1|[environment]upstream_status_status|succeed
+-|2015|f1|[environment]upstream_status_suite|${SUITE_NAME_UPSTREAM}
+-|2015|f1|[environment]upstream_status_task|bar
 __DB_BROADCASTS__
+
+# Confirm the debug output from the suite log shows the xtrigger for the status
+# has an instance with a remaining_wait which is non-zero - indicating the delay
+# is preventing the xtrigger being completed successfully
+grep_ok \
+    "\[xtrigger-func out\] \[false, {\"status\": \"succeed\", \"remaining_wait\": [1-4]\.\?[0-9]*\?, \"task\": \"bar\", \"point\": \"....\", \"suite\": \"${SUITE_NAME_UPSTREAM}\", \"message\": null, \"offset\": null, \"cylc_run_dir\": \".*\"}\]" \
+    "${SUITE_LOG}"
 
 purge_suite $SUITE_NAME
 
 # Clean up the upstream suite, just in case (expect error here, but exit 0):
 cylc stop --now $SUITE_NAME_UPSTREAM --max-polls=20 --interval=2 > /dev/null 2>&1
-purge_suite $SUITE_NAME_UPSTREAM 
+purge_suite $SUITE_NAME_UPSTREAM

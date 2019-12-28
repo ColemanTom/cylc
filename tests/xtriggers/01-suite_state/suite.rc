@@ -10,11 +10,14 @@
     [[xtriggers]]
          upstream = suite_state(suite={{UPSTREAM}}, task=foo,\
                                 point=%(point)s, message='data ready'):PT1S
+         upstream_status = suite_state(suite={{UPSTREAM}}, task=bar, \
+                                       point=%(point)s, \
+                                       status="succeed", delay="PT5S"):PT1S
    [[dependencies]]
         [[[P1Y]]]
            graph = """
               foo
-              @upstream => FAM:succeed-all => blam
+              @upstream & @upstream_status => FAM:succeed-all => blam
                    """
 [runtime]
     [[root]]
