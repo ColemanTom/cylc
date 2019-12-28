@@ -129,13 +129,16 @@ The suite state trigger function signature looks like this:
 .. code-block:: python
 
    suite_state(suite, task, point, offset=None, status='succeeded',
-               message=None, cylc_run_dir=None, debug=False)
+               message=None, cylc_run_dir=None, debug=False, delay='PT10S')
 
 The first three arguments are compulsory; they single out the target suite name
 (``suite``) task name (``task``) and cycle point
 (``point``). The function arguments mirror the arguments and options of
 the ``cylc suite-state`` command - see
-``cylc suite-state --help`` for documentation.
+``cylc suite-state --help`` for documentation. The delay argument adds a wait
+to the task polling. If specified, the task must have met the required status
+or have generated the required message ``delay`` interval ago. If this delay
+has not been met, then the trigger will not be satisfied.
 
 As a simple example, consider the suites in
 ``<cylc-dir>/etc/dev-suites/xtrigger/suite_state/``. The "upstream"
@@ -180,7 +183,8 @@ this:
        'offset': offset,
        'status': status,
        'message': message,
-       'cylc_run_dir': cylc_run_dir
+       'cylc_run_dir': cylc_run_dir,
+       'remaining_wait': remaining_wait
    }
    return (satisfied, results)
 
@@ -204,9 +208,11 @@ To see this, take a look at the job script for one of the downstream tasks:
        upstream_cylc_run_dir="/home/vagrant/cylc-run"
        upstream_offset="None"
        upstream_message="data ready"
-       upstream_status="succeeded"
+       upstream_status="None"
        upstream_point="2011"
-       upstream_task="foo"}
+       upstream_task="foo"
+       upstream_remaining_wait="0"
+   }
    ...
 
 .. note::
